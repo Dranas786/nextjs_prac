@@ -1,21 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-// You wrote these in lib/storage.ts
 import { getItem, setItem, removeItem, safeParseJson } from "@/lib/storage";
 
-/**
- * useLocalStorage
- * Keeps a state value in sync with localStorage.
- *
- * API:
- *   const [value, setValue, clear] = useLocalStorage<T>(key, initialValue)
- *
- * - Reads initial value from localStorage on mount (SSR-safe)
- * - Writes through to localStorage when value changes via setValue
- * - Listens to 'storage' events to sync across tabs
- * - clear() removes key from localStorage and resets to initialValue
- */
 export function useLocalStorage<T>(
   key: string,
   initialValue: T
@@ -24,46 +11,44 @@ export function useLocalStorage<T>(
   setValue: (next: T | ((curr: T) => T)) => void,
   clear: () => void
 ] {
-  // 1) State init (SSR-safe): use a lazy initializer
-  const [value, setValueState] = useState<T>(() => {
-    // TODO: If not in browser, return initialValue.
-    // TODO: Otherwise, return getItem<T>(key, initialValue).
-    return initialValue; // placeholder
-  });
+  const [value, setValueState] = useState<T>(
+    () => getItem<T>(key, initialValue) // as getItem already checks for window
+  );
 
-  // 2) Setter: supports direct value or updater function
   const setValue = useCallback(
     (next: T | ((curr: T) => T)) => {
-      // TODO: Compute nextValue (if function, call with current state)
-      // TODO: setValueState(nextValue)
-      // TODO: setItem<T>(key, nextValue)
+      setValueState((curr) => {
+        const nextValue =
+          typeof next === "function" ? (next as (c: T) => T)(curr) : next;
+        // (next as (c: T) => T)(curr) is next(curr) but also asserts next as a function
+        setItem<T>(key, nextValue);
+        return nextValue;
+      });
     },
     [key]
   );
 
-  // 3) Clear: remove from localStorage and reset state
   const clear = useCallback(() => {
-    // TODO: removeItem(key)
-    // TODO: setValueState(initialValue)
+    removeItem(key);
+    setValueState(initialValue);
   }, [key, initialValue]);
 
-  // 4) Cross-tab sync: handle 'storage' events
   useEffect(() => {
-    // Guard: only run in browser
     if (typeof window === "undefined") return;
 
     const onStorage = (e: StorageEvent) => {
-      // TODO: ignore events for other keys
-      // TODO: if e.newValue === null → setValueState(initialValue)
-      // TODO: else parse e.newValue via safeParseJson<T>(e.newValue)
-      //       - if ok → setValueState(parsed.value)
-      //       - if not ok → ignore (keep current state)
+      if (e.key !== key) return;
+      if (e.newValue === null) {
+        setValueState(initialValue);
+        return;
+      }
+      const parsed = safeParseJson<T>(e.newValue);
+      if (parsed.ok) setValueState(parsed.value);
     };
 
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, [key, initialValue]);
 
-  // 5) Return API
   return [value, setValue, clear];
 }
